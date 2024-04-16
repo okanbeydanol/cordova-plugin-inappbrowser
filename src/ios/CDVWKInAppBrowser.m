@@ -701,6 +701,7 @@ static CDVWKInAppBrowser* instance = nil;
 
 CGFloat lastReducedStatusBarHeight = 0.0;
 BOOL isExiting = FALSE;
+BOOL viewRenderedAtLeastOnce = FALSE;
 
 - (id)initWithBrowserOptions: (CDVInAppBrowserOptions*) browserOptions andSettings:(NSDictionary *)settings
 {
@@ -1063,6 +1064,7 @@ BOOL isExiting = FALSE;
 - (void)viewDidLoad
 {
     [super viewDidLoad];
+    [self performSelector:@selector(adjustWebViewPadding) withObject:nil afterDelay:2.0];
 }
 
 - (void)viewDidDisappear:(BOOL)animated
@@ -1284,12 +1286,46 @@ BOOL isExiting = FALSE;
         [self rePositionViews];
     } completion:^(id<UIViewControllerTransitionCoordinatorContext> context)
     {
-
+        [self performSelector:@selector(adjustWebViewPadding) withObject:nil afterDelay:2.0];
     }];
 
     [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
 }
 
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    viewRenderedAtLeastOnce = FALSE;
+}
+
+- (BOOL)hasTopNotch {
+    if (@available(iOS 11.0, *)) {
+        if (UIInterfaceOrientationIsLandscape([UIApplication sharedApplication].statusBarOrientation)) {
+            return [[[UIApplication sharedApplication] delegate] window].safeAreaInsets.right > 20.0;
+        } else {
+            return [[[UIApplication sharedApplication] delegate] window].safeAreaInsets.top > 20.0;
+        }
+    }
+    return NO;
+}
+
+- (void)adjustWebViewPadding {
+    UIInterfaceOrientation orientation = [[UIApplication sharedApplication] statusBarOrientation];
+    if (IsAtLeastiOSVersion(@"7.0") && UIInterfaceOrientationIsLandscape(orientation) && !viewRenderedAtLeastOnce) {
+        viewRenderedAtLeastOnce = TRUE;
+        CGRect viewBounds = [self.webView bounds];
+        if ([self hasTopNotch]) {
+            float topSafeArea = [[[UIApplication sharedApplication] delegate] window].safeAreaInsets.right;
+            viewBounds.size.width -= topSafeArea;
+            UIView *paddingView = [[UIView alloc] initWithFrame:CGRectMake(CGRectGetMaxX(viewBounds), CGRectGetMinY(viewBounds), topSafeArea, CGRectGetHeight(viewBounds))];
+            paddingView.backgroundColor = [UIColor colorWithRed:(49.0/255.0) green:(55.0/255.0) blue:(58.0/255.0) alpha:1.0];
+            UIWindow *keyWindow = [[UIApplication sharedApplication] keyWindow];
+            [keyWindow addSubview:paddingView];
+        }
+        self.webView.frame = viewBounds;
+        [self setNeedsStatusBarAppearanceUpdate];
+    }
+    [self rePositionViews];
+}
 #pragma mark UIAdaptivePresentationControllerDelegate
 
 - (void)presentationControllerWillDismiss:(UIPresentationController *)presentationController {
