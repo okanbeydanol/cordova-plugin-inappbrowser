@@ -39,6 +39,10 @@
 #define    TOOLBAR_HEIGHT 44.0
 #define    LOCATIONBAR_HEIGHT 21.0
 #define    FOOTER_HEIGHT ((TOOLBAR_HEIGHT) + (LOCATIONBAR_HEIGHT))
+#define    kBannerViewTag 1001
+#define    kVideoObserverInterval 1.0
+
+NSTimer *kVideoObserverTimer = nil;
 
 #pragma mark CDVWKInAppBrowser
 
@@ -214,28 +218,8 @@ static CDVWKInAppBrowser* instance = nil;
         int closeButtonIndex = browserOptions.lefttoright ? (browserOptions.hidenavigationbuttons ? 1 : 4) : 0;
         [self.inAppBrowserViewController setCloseButtonTitle:browserOptions.closebuttoncaption :browserOptions.closebuttoncolor :closeButtonIndex];
     }
-    // Set Presentation Style
-    UIModalPresentationStyle presentationStyle = UIModalPresentationFullScreen; // default
-    if (browserOptions.presentationstyle != nil) {
-        if ([[browserOptions.presentationstyle lowercaseString] isEqualToString:@"pagesheet"]) {
-            presentationStyle = UIModalPresentationPageSheet;
-        } else if ([[browserOptions.presentationstyle lowercaseString] isEqualToString:@"formsheet"]) {
-            presentationStyle = UIModalPresentationFormSheet;
-        }
-    }
-    self.inAppBrowserViewController.modalPresentationStyle = presentationStyle;
-    
-    // Set Transition Style
-    UIModalTransitionStyle transitionStyle = UIModalTransitionStyleCoverVertical; // default
-    if (browserOptions.transitionstyle != nil) {
-        if ([[browserOptions.transitionstyle lowercaseString] isEqualToString:@"fliphorizontal"]) {
-            transitionStyle = UIModalTransitionStyleFlipHorizontal;
-        } else if ([[browserOptions.transitionstyle lowercaseString] isEqualToString:@"crossdissolve"]) {
-            transitionStyle = UIModalTransitionStyleCrossDissolve;
-        }
-    }
-    self.inAppBrowserViewController.modalTransitionStyle = transitionStyle;
-    
+    self.inAppBrowserViewController.modalPresentationStyle = UIModalPresentationFullScreen;
+    self.inAppBrowserViewController.modalTransitionStyle = UIModalTransitionStyleCoverVertical;
     //prevent webView from bouncing
     if (browserOptions.disallowoverscroll) {
         if ([self.inAppBrowserViewController.webView respondsToSelector:@selector(scrollView)]) {
@@ -259,8 +243,30 @@ static CDVWKInAppBrowser* instance = nil;
     
     [self.inAppBrowserViewController navigateTo:url];
     if (!browserOptions.hidden) {
-        [self show:nil withNoAnimate:browserOptions.hidden];
+        [self showInAppBrowserWithAnimation:!browserOptions.hidden];
     }
+}
+
+- (void)showInAppBrowserWithAnimation:(BOOL)animated {
+    if (self.inAppBrowserViewController == nil) {
+        NSLog(@"Tried to show IAB after it was closed.");
+        return;
+    }
+    if (_previousStatusBarStyle != -1) {
+        NSLog(@"Tried to show IAB while already shown");
+        return;
+    }
+
+    if (!animated) {
+        _previousStatusBarStyle = [UIApplication sharedApplication].statusBarStyle;
+    }
+
+    CDVInAppBrowserNavigationController* nav = [[CDVInAppBrowserNavigationController alloc] initWithRootViewController:self.inAppBrowserViewController];
+    nav.navigationBarHidden = YES;
+    nav.modalPresentationStyle = self.inAppBrowserViewController.modalPresentationStyle;
+    nav.presentationController.delegate = self.inAppBrowserViewController;
+
+    [self.viewController presentViewController:nav animated:animated completion:nil];
 }
 
 - (void)show:(CDVInvokedUrlCommand*)command{
@@ -694,7 +700,6 @@ static CDVWKInAppBrowser* instance = nil;
 @end //CDVWKInAppBrowser
 
 #pragma mark CDVWKInAppBrowserViewController
-
 @implementation CDVWKInAppBrowserViewController
 
 @synthesize currentURL;
@@ -750,28 +755,19 @@ BOOL viewRenderedAtLeastOnce = FALSE;
     [configuration.userContentController addScriptMessageHandler:self name:IAB_BRIDGE_NAME];
     
     //WKWebView options
-    configuration.allowsInlineMediaPlayback = _browserOptions.allowinlinemediaplayback;
+    configuration.allowsInlineMediaPlayback = TRUE;
+    configuration.allowsPictureInPictureMediaPlayback = FALSE;
+    configuration.allowsAirPlayForMediaPlayback = FALSE;
     if (IsAtLeastiOSVersion(@"10.0")) {
-        configuration.ignoresViewportScaleLimits = _browserOptions.enableviewportscale;
-        if(_browserOptions.mediaplaybackrequiresuseraction == YES){
-            configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeAll;
-        }else{
-            configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
-        }
-    }else{ // iOS 9
-        configuration.mediaPlaybackRequiresUserAction = _browserOptions.mediaplaybackrequiresuseraction;
+        configuration.ignoresViewportScaleLimits = TRUE;
+        configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
+    } else { // iOS 9
+        configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone;
     }
     
     if (@available(iOS 13.0, *)) {
-        NSString *contentMode = [self settingForKey:@"PreferredContentMode"];
-        if ([contentMode isEqual: @"mobile"]) {
-            configuration.defaultWebpagePreferences.preferredContentMode = WKContentModeMobile;
-        } else if ([contentMode  isEqual: @"desktop"]) {
-            configuration.defaultWebpagePreferences.preferredContentMode = WKContentModeDesktop;
-        }
-        
+        configuration.defaultWebpagePreferences.preferredContentMode = WKContentModeMobile;
     }
-    
 
     self.webView = [[WKWebView alloc] initWithFrame:webViewBounds configuration:configuration];
     
@@ -1061,15 +1057,10 @@ BOOL viewRenderedAtLeastOnce = FALSE;
     }
 }
 
-- (void)viewDidLoad
-{
-    [super viewDidLoad];
-    [self performSelector:@selector(adjustWebViewPadding) withObject:nil afterDelay:2.0];
-}
-
 - (void)viewDidDisappear:(BOOL)animated
 {
     [super viewDidDisappear:animated];
+    [self stopObservingVideos];
     if (isExiting && (self.navigationDelegate != nil) && [self.navigationDelegate respondsToSelector:@selector(browserExit)]) {
         [self.navigationDelegate browserExit];
         isExiting = FALSE;
@@ -1106,6 +1097,13 @@ BOOL viewRenderedAtLeastOnce = FALSE;
     dispatch_async(dispatch_get_main_queue(), ^{
         isExiting = TRUE;
         lastReducedStatusBarHeight = 0.0;
+        
+        UIWindow *keyWindow = [[UIApplication sharedApplication] keyWindow];
+        UIView *bannerView = [keyWindow viewWithTag:kBannerViewTag];
+        if (bannerView) {
+            [bannerView removeFromSuperview];
+        }
+        
         if ([weakSelf respondsToSelector:@selector(presentingViewController)]) {
             [[weakSelf presentingViewController] dismissViewControllerAnimated:YES completion:nil];
         } else {
@@ -1188,6 +1186,7 @@ BOOL viewRenderedAtLeastOnce = FALSE;
     
     // loading url, start spinner, update back/forward
     
+    [self startObservingVideos];
     self.addressLabel.text = NSLocalizedString(@"Loading...", nil);
     self.backButton.enabled = theWebView.canGoBack;
     self.forwardButton.enabled = theWebView.canGoForward;
@@ -1198,6 +1197,27 @@ BOOL viewRenderedAtLeastOnce = FALSE;
     }
     
     return [self.navigationDelegate didStartProvisionalNavigation:theWebView];
+}
+
+- (void)startObservingVideos {
+    kVideoObserverTimer =  [NSTimer scheduledTimerWithTimeInterval:kVideoObserverInterval target:self selector:@selector(checkAndSetPlaysInline) userInfo:nil repeats:YES];
+}
+
+- (void)checkAndSetPlaysInline {
+    NSString *script = @"const videos = document.querySelectorAll('video'); \
+                          videos.forEach(video => { \
+                              video.setAttribute('playsinline', ''); \
+                              video.setAttribute('webkit-playsinline', ''); \
+                          });";
+    [self.webView evaluateJavaScript:script completionHandler:nil];
+    [self stopObservingVideos];
+}
+
+- (void)stopObservingVideos {
+    if (kVideoObserverTimer) {
+        [kVideoObserverTimer invalidate];
+        kVideoObserverTimer = nil;
+    }
 }
 
 - (void)webView:(WKWebView *)theWebView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler
@@ -1275,34 +1295,61 @@ BOOL viewRenderedAtLeastOnce = FALSE;
     if ((self.orientationDelegate != nil) && [self.orientationDelegate respondsToSelector:@selector(supportedInterfaceOrientations)]) {
         return [self.orientationDelegate supportedInterfaceOrientations];
     }
-    
-    return 1 << UIInterfaceOrientationPortrait;
+    UIInterfaceOrientation orientation = [[UIApplication sharedApplication] statusBarOrientation];
+    if(orientation == UIInterfaceOrientationPortrait){
+        return UIInterfaceOrientationMaskPortrait;
+    } else {
+        return UIInterfaceOrientationMaskLandscapeLeft | UIInterfaceOrientationMaskLandscapeRight;
+    }
 }
 
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
 {
     [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context)
     {
-        [self rePositionViews];
     } completion:^(id<UIViewControllerTransitionCoordinatorContext> context)
     {
-        [self performSelector:@selector(adjustWebViewPadding) withObject:nil afterDelay:2.0];
+        viewRenderedAtLeastOnce = FALSE;
+        CGRect viewBounds = [self.webView bounds];
+        viewBounds.size.width = [UIScreen mainScreen].bounds.size.width;
+        viewBounds.origin.x = 0;
+        UIWindow *keyWindow = [[UIApplication sharedApplication] keyWindow];
+        UIView *bannerView = [keyWindow viewWithTag:kBannerViewTag];
+        if (bannerView) {
+            [bannerView removeFromSuperview];
+        }
+        self.webView.frame = viewBounds;
+        [self setNeedsStatusBarAppearanceUpdate];
+        [self performSelector:@selector(adjustWebViewPadding) withObject:nil afterDelay:0.1];
     }];
 
     [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
 }
 
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    [self performSelector:@selector(adjustWebViewPadding) withObject:nil afterDelay:0.3];
+}
+
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
+    [self stopObservingVideos];
     viewRenderedAtLeastOnce = FALSE;
 }
 
 - (BOOL)hasTopNotch {
     if (@available(iOS 11.0, *)) {
-        if (UIInterfaceOrientationIsLandscape([UIApplication sharedApplication].statusBarOrientation)) {
-            return [[[UIApplication sharedApplication] delegate] window].safeAreaInsets.right > 20.0;
+        UIInterfaceOrientation orientation = [UIApplication sharedApplication].statusBarOrientation;
+        UIEdgeInsets safeAreaInsets = [[[UIApplication sharedApplication] delegate] window].safeAreaInsets;
+        
+        if (UIInterfaceOrientationIsLandscape(orientation)) {
+            if (orientation == UIInterfaceOrientationLandscapeRight) {
+                return safeAreaInsets.right > 20.0;
+            } else {
+                return safeAreaInsets.left > 20.0;
+            }
         } else {
-            return [[[UIApplication sharedApplication] delegate] window].safeAreaInsets.top > 20.0;
+            return safeAreaInsets.top > 20.0;
         }
     }
     return NO;
@@ -1314,17 +1361,25 @@ BOOL viewRenderedAtLeastOnce = FALSE;
         viewRenderedAtLeastOnce = TRUE;
         CGRect viewBounds = [self.webView bounds];
         if ([self hasTopNotch]) {
-            float topSafeArea = [[[UIApplication sharedApplication] delegate] window].safeAreaInsets.right;
-            viewBounds.size.width -= topSafeArea;
-            UIView *paddingView = [[UIView alloc] initWithFrame:CGRectMake(CGRectGetMaxX(viewBounds), CGRectGetMinY(viewBounds), topSafeArea, CGRectGetHeight(viewBounds))];
-            paddingView.backgroundColor = [UIColor colorWithRed:(49.0/255.0) green:(55.0/255.0) blue:(58.0/255.0) alpha:1.0];
             UIWindow *keyWindow = [[UIApplication sharedApplication] keyWindow];
+            UIView *paddingView;
+            if (orientation != UIInterfaceOrientationLandscapeRight) {
+                CGFloat safeAreaInset = [[[UIApplication sharedApplication] delegate] window].safeAreaInsets.right;
+                viewBounds.size.width -= safeAreaInset;
+                paddingView = [[UIView alloc] initWithFrame:CGRectMake(CGRectGetMaxX(viewBounds), CGRectGetMinY(viewBounds), safeAreaInset, CGRectGetHeight(viewBounds))];
+            } else {
+                CGFloat safeAreaInset = [[[UIApplication sharedApplication] delegate] window].safeAreaInsets.left;
+                viewBounds.origin.x += safeAreaInset;
+                viewBounds.size.width -= safeAreaInset;
+                paddingView = [[UIView alloc] initWithFrame:CGRectMake(0, CGRectGetMinY(viewBounds), safeAreaInset, CGRectGetHeight(viewBounds))];
+            }
+            paddingView.tag = kBannerViewTag;
+            paddingView.backgroundColor = [UIColor colorWithRed:(49.0/255.0) green:(55.0/255.0) blue:(58.0/255.0) alpha:1.0];
             [keyWindow addSubview:paddingView];
         }
         self.webView.frame = viewBounds;
         [self setNeedsStatusBarAppearanceUpdate];
     }
-    [self rePositionViews];
 }
 #pragma mark UIAdaptivePresentationControllerDelegate
 
