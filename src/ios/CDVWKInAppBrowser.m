@@ -40,7 +40,7 @@
 #define    LOCATIONBAR_HEIGHT 21.0
 #define    FOOTER_HEIGHT ((TOOLBAR_HEIGHT) + (LOCATIONBAR_HEIGHT))
 #define    kBannerViewTag 1001
-#define    kVideoObserverInterval 1.0
+#define    kVideoObserverInterval 0.2
 
 NSTimer *kVideoObserverTimer = nil;
 
@@ -1060,7 +1060,6 @@ BOOL viewRenderedAtLeastOnce = FALSE;
 - (void)viewDidDisappear:(BOOL)animated
 {
     [super viewDidDisappear:animated];
-    [self stopObservingVideos];
     if (isExiting && (self.navigationDelegate != nil) && [self.navigationDelegate respondsToSelector:@selector(browserExit)]) {
         [self.navigationDelegate browserExit];
         isExiting = FALSE;
@@ -1134,6 +1133,7 @@ BOOL viewRenderedAtLeastOnce = FALSE;
 
 - (void)viewWillAppear:(BOOL)animated
 {
+    [self startObservingVideos];
     [self rePositionViews];
     
     [super viewWillAppear:animated];
@@ -1186,7 +1186,6 @@ BOOL viewRenderedAtLeastOnce = FALSE;
     
     // loading url, start spinner, update back/forward
     
-    [self startObservingVideos];
     self.addressLabel.text = NSLocalizedString(@"Loading...", nil);
     self.backButton.enabled = theWebView.canGoBack;
     self.forwardButton.enabled = theWebView.canGoForward;
@@ -1210,7 +1209,6 @@ BOOL viewRenderedAtLeastOnce = FALSE;
                               video.setAttribute('webkit-playsinline', ''); \
                           });";
     [self.webView evaluateJavaScript:script completionHandler:nil];
-    [self stopObservingVideos];
 }
 
 - (void)stopObservingVideos {
