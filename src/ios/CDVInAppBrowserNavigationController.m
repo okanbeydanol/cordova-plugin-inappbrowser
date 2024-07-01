@@ -45,10 +45,7 @@
 
 - (BOOL)shouldAutorotate
 {
-    if ((self.orientationDelegate != nil) && [self.orientationDelegate respondsToSelector:@selector(shouldAutorotate)]) {
-        return [self.orientationDelegate shouldAutorotate];
-    }
-    return YES;
+    return _browserOptions.autorotate;
 }
 
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations
@@ -56,11 +53,18 @@
     if ((self.orientationDelegate != nil) && [self.orientationDelegate respondsToSelector:@selector(supportedInterfaceOrientations)]) {
         return [self.orientationDelegate supportedInterfaceOrientations];
     }
-    UIInterfaceOrientation orientation = [[UIApplication sharedApplication] statusBarOrientation];
-    if(orientation == UIInterfaceOrientationPortrait){
+    if (!_browserOptions.autorotate) {
+        return UIInterfaceOrientationMaskPortrait;
+    }
+    if (!_browserOptions.landscape) {
         return UIInterfaceOrientationMaskPortrait;
     } else {
-        return UIInterfaceOrientationMaskLandscapeLeft | UIInterfaceOrientationMaskLandscapeRight;
+        UIInterfaceOrientation orientation = [[UIApplication sharedApplication] statusBarOrientation];
+        if(orientation != UIInterfaceOrientationLandscapeLeft){
+            return UIInterfaceOrientationMaskLandscapeRight | UIInterfaceOrientationMaskLandscapeLeft;
+        }else{
+            return UIInterfaceOrientationMaskLandscapeLeft | UIInterfaceOrientationMaskLandscapeRight;
+        }
     }
 }
 

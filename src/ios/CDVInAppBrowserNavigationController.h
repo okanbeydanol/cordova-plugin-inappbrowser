@@ -18,10 +18,11 @@
  */
 
 #import <Cordova/CDVScreenOrientationDelegate.h>
-
+#import "CDVInAppBrowserOptions.h"
 
 @interface CDVInAppBrowserNavigationController : UINavigationController
 
+@property (nonatomic, strong) CDVInAppBrowserOptions *browserOptions;
 @property (nonatomic, weak) id <CDVScreenOrientationDelegate> orientationDelegate;
 
 @end

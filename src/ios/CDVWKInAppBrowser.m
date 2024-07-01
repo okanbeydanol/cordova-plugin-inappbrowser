@@ -243,11 +243,11 @@ static CDVWKInAppBrowser* instance = nil;
     
     [self.inAppBrowserViewController navigateTo:url];
     if (!browserOptions.hidden) {
-        [self showInAppBrowserWithAnimation:!browserOptions.hidden];
+        [self showInAppBrowserWithAnimation:!browserOptions.hidden withOptions:browserOptions];
     }
 }
 
-- (void)showInAppBrowserWithAnimation:(BOOL)animated {
+- (void)showInAppBrowserWithAnimation:(BOOL)animated withOptions:(CDVInAppBrowserOptions *)browserOptions {
     if (self.inAppBrowserViewController == nil) {
         NSLog(@"Tried to show IAB after it was closed.");
         return;
@@ -263,6 +263,7 @@ static CDVWKInAppBrowser* instance = nil;
 
     CDVInAppBrowserNavigationController* nav = [[CDVInAppBrowserNavigationController alloc] initWithRootViewController:self.inAppBrowserViewController];
     nav.navigationBarHidden = YES;
+    nav.browserOptions = browserOptions;
     nav.modalPresentationStyle = self.inAppBrowserViewController.modalPresentationStyle;
     nav.presentationController.delegate = self.inAppBrowserViewController;
 
@@ -1089,14 +1090,15 @@ BOOL viewRenderedAtLeastOnce = FALSE;
 - (void)close
 {
     self.currentURL = nil;
-    
+    _browserOptions.autorotate = FALSE;
+
     __weak UIViewController* weakSelf = self;
     
     // Run later to avoid the "took a long time" log message.
     dispatch_async(dispatch_get_main_queue(), ^{
         isExiting = TRUE;
         lastReducedStatusBarHeight = 0.0;
-        
+
         UIWindow *keyWindow = [[UIApplication sharedApplication] keyWindow];
         UIView *bannerView = [keyWindow viewWithTag:kBannerViewTag];
         if (bannerView) {
@@ -1134,7 +1136,6 @@ BOOL viewRenderedAtLeastOnce = FALSE;
 - (void)viewWillAppear:(BOOL)animated
 {
     [self startObservingVideos];
-    [self rePositionViews];
     
     [super viewWillAppear:animated];
 }
@@ -1282,10 +1283,7 @@ BOOL viewRenderedAtLeastOnce = FALSE;
 
 - (BOOL)shouldAutorotate
 {
-    if ((self.orientationDelegate != nil) && [self.orientationDelegate respondsToSelector:@selector(shouldAutorotate)]) {
-        return [self.orientationDelegate shouldAutorotate];
-    }
-    return YES;
+    return self->_browserOptions.autorotate;
 }
 
 - (UIInterfaceOrientationMask)supportedInterfaceOrientations
@@ -1293,12 +1291,23 @@ BOOL viewRenderedAtLeastOnce = FALSE;
     if ((self.orientationDelegate != nil) && [self.orientationDelegate respondsToSelector:@selector(supportedInterfaceOrientations)]) {
         return [self.orientationDelegate supportedInterfaceOrientations];
     }
-    UIInterfaceOrientation orientation = [[UIApplication sharedApplication] statusBarOrientation];
-    if(orientation == UIInterfaceOrientationPortrait){
+    if (!_browserOptions.autorotate) {
+        return UIInterfaceOrientationMaskPortrait;
+    }
+    if (!_browserOptions.landscape) {
         return UIInterfaceOrientationMaskPortrait;
     } else {
-        return UIInterfaceOrientationMaskLandscapeLeft | UIInterfaceOrientationMaskLandscapeRight;
+        UIInterfaceOrientation orientation = [[UIApplication sharedApplication] statusBarOrientation];
+        if(orientation != UIInterfaceOrientationLandscapeLeft){
+            return UIInterfaceOrientationMaskLandscapeRight | UIInterfaceOrientationMaskLandscapeLeft;
+        }else{
+            return UIInterfaceOrientationMaskLandscapeLeft | UIInterfaceOrientationMaskLandscapeRight;
+        }
     }
+}
+
+- (void)changeAutoOrientation {
+    self->_browserOptions.autorotate = self->_browserOptions.landscape;
 }
 
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator
@@ -1326,13 +1335,14 @@ BOOL viewRenderedAtLeastOnce = FALSE;
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    [self performSelector:@selector(adjustWebViewPadding) withObject:nil afterDelay:0.3];
+    [self performSelector:@selector(changeAutoOrientation) withObject:nil afterDelay:1.0];
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
-    [super viewWillDisappear:animated];
     [self stopObservingVideos];
     viewRenderedAtLeastOnce = FALSE;
+    _browserOptions.autorotate = FALSE;
+    [super viewWillDisappear:animated];
 }
 
 - (BOOL)hasTopNotch {
