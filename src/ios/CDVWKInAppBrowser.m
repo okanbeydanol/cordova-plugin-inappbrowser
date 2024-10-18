@@ -1105,6 +1105,13 @@ BOOL viewRenderedAtLeastOnce = FALSE;
             [bannerView removeFromSuperview];
         }
         
+        // Clear and remove the web view
+        if (self.webView) {
+            [self.webView stopLoading];
+            [self.webView loadHTMLString:@"" baseURL:nil];  // Clear content
+            [self.webView removeFromSuperview];  // Remove web view from hierarchy
+        }
+
         if ([weakSelf respondsToSelector:@selector(presentingViewController)]) {
             [[weakSelf presentingViewController] dismissViewControllerAnimated:YES completion:nil];
         } else {
