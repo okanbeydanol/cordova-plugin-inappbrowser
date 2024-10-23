@@ -368,7 +368,7 @@ static CDVWKInAppBrowser* instance = nil;
 {
     if ([[UIApplication sharedApplication] openURL:url] == NO) {
         [[NSNotificationCenter defaultCenter] postNotification:[NSNotification notificationWithName:CDVPluginHandleOpenURLNotification object:url]];
-        [[UIApplication sharedApplication] openURL:url];
+        [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
     }
 }
 
