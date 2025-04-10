@@ -532,9 +532,14 @@ public class InAppBrowser extends CordovaPlugin {
                 childView.setWebViewClient(new WebViewClient() {
                     // NB: wait for about:blank before dismissing
                     public void onPageFinished(WebView view, String url) {
-                        if (dialog != null && !cordova.getActivity().isFinishing()) {
-                            dialog.dismiss();
-                            dialog = null;
+                         if (dialog != null && dialog.isShowing()) {
+                            try {
+                                if (cordova.getActivity() != null && !cordova.getActivity().isFinishing()) {
+                                    dialog.dismiss();
+                                }
+                            } catch (IllegalArgumentException e) {
+                                Log.w("InAppBrowser", "Dialog dismiss failed: View not attached to window manager.");
+                            }
                         }
                     }
                 });
